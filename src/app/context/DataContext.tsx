@@ -1,24 +1,63 @@
 import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
+import { formatDistanceToNow } from 'date-fns';
 import {
+  createCategoryApi,
+  createCustomerApi,
+  createOrderApi,
   createProductApi,
   deleteProductApi,
+  fetchCategoriesApi,
+  fetchConversationsApi,
+  fetchCustomersApi,
+  fetchMessagesApi,
+  fetchOrdersApi,
   fetchProductsApi,
   formatProductPrice,
+  getOrCreateConversationApi,
+  markConversationReadApi,
+  sendMessageApi,
+  updateConversationStatusApi,
+  updateCustomerApi,
+  updateOrderStatusApi,
   updateProductApi,
+  type CategoryDto,
+  type ConversationDto,
+  type CreateOrderInput,
+  type CustomerDto,
+  type CustomerInput,
+  type CustomerTier,
+  type MessageDto,
+  type OrderDto,
+  type OrderStatus,
   type ProductDto,
 } from '../lib/api';
 
-interface Order {
+// ---------------------------------------------------------------------------
+// Types (frontend view models — all backed by the real API now)
+// ---------------------------------------------------------------------------
+
+export interface OrderItem {
+  productId?: string;
+  productName: string;
+  qty: number;
+  price: number;
+}
+
+export interface Order {
   id: string;
+  ref: string;
+  customerId: string;
   customer: string;
+  phone: string;
   product: string;
   amount: string;
-  status: 'new' | 'confirmed' | 'dispatched' | 'delivered';
+  amountValue: number;
+  status: OrderStatus;
   date: string;
-  phone: string;
-  email: string;
+  createdAt: string;
   address: string;
   city: string;
+  items: OrderItem[];
 }
 
 export interface Product {
@@ -31,6 +70,9 @@ export interface Product {
   status: 'active' | 'out_of_stock';
   description?: string;
   image?: string;
+  images?: string[];
+  orderCount: number;
+  unitsSold: number;
   variants?: {
     colors?: string[];
     sizes?: string[];
@@ -38,48 +80,59 @@ export interface Product {
   };
 }
 
-interface Customer {
-  id: number;
+export interface Customer {
+  id: string;
   name: string;
   phone: string;
   email: string;
   city: string;
   orders: number;
   totalSpent: string;
-  tag: 'VIP' | 'Regular' | 'New';
+  totalSpentValue: number;
+  tier: CustomerTier;
 }
 
-interface Chat {
-  id: number;
+export interface Chat {
+  id: string;
+  customerId: string;
   name: string;
+  phone: string;
   lastMessage: string;
   time: string;
   unread: number;
-  status: 'active' | 'resolved' | 'pending';
+  status: 'active' | 'pending' | 'resolved';
+  lastMessageAt?: string;
 }
 
-interface DataContextType {
-  orders: Order[];
-  addOrder: (order: Omit<Order, 'id'>) => void;
-  updateOrderStatus: (id: string, status: Order['status']) => void;
-
-  products: Product[];
-  productsLoading: boolean;
-  productsError: string | null;
-  refreshProducts: () => Promise<void>;
-  addProduct: (product: Omit<Product, 'id' | 'price' | 'priceValue' | 'status'> & { priceValue: number; status?: Product['status'] }) => Promise<void>;
-  updateProduct: (id: string, updates: Partial<Omit<Product, 'id' | 'price' | 'priceValue'>> & { priceValue?: number }) => Promise<void>;
-  deleteProduct: (id: string) => Promise<void>;
-
-  customers: Customer[];
-  addCustomer: (customer: Omit<Customer, 'id'>) => void;
-  updateCustomer: (id: number, updates: Partial<Customer>) => void;
-
-  chats: Chat[];
-  updateChatStatus: (id: number, status: Chat['status']) => void;
+export interface ChatMessage {
+  id: string;
+  from: 'customer' | 'ai' | 'agent';
+  text: string;
+  time: string;
+  createdAt: string;
 }
 
-const DataContext = createContext<DataContextType | undefined>(undefined);
+export interface Category {
+  id: string;
+  name: string;
+}
+
+// ---------------------------------------------------------------------------
+// Mappers
+// ---------------------------------------------------------------------------
+
+function formatDate(iso: string): string {
+  return new Date(iso).toLocaleDateString('en-PK', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+function relTime(iso?: string): string {
+  if (!iso) return '';
+  try {
+    return formatDistanceToNow(new Date(iso), { addSuffix: true });
+  } catch {
+    return '';
+  }
+}
 
 function toProduct(dto: ProductDto): Product {
   return {
@@ -92,88 +145,133 @@ function toProduct(dto: ProductDto): Product {
     status: dto.status,
     description: dto.description,
     image: dto.image,
+    images: dto.images,
+    orderCount: dto.orderCount ?? 0,
+    unitsSold: dto.unitsSold ?? 0,
     variants: dto.variants,
   };
 }
 
-const initialOrders: Order[] = [
-  {
-    id: '#1001',
-    customer: 'Rahul Kumar',
-    product: 'iPhone 15 Pro',
-    amount: 'PKR 129,999',
-    status: 'new',
-    date: '2026-04-25',
-    phone: '+92 300 1234567',
-    email: 'rahul@example.com',
-    address: 'House 123, Street 45, Block A',
-    city: 'Karachi'
-  },
-  {
-    id: '#1002',
-    customer: 'Priya Sharma',
-    product: 'Samsung TV',
-    amount: 'PKR 45,000',
-    status: 'confirmed',
-    date: '2026-04-25',
-    phone: '+92 301 2345678',
-    email: 'priya@example.com',
-    address: 'Flat 567, Garden Town',
-    city: 'Lahore'
-  },
-  {
-    id: '#1003',
-    customer: 'Amit Patel',
-    product: 'MacBook Pro',
-    amount: 'PKR 189,000',
-    status: 'dispatched',
-    date: '2026-04-24',
-    phone: '+92 302 3456789',
-    email: 'amit@example.com',
-    address: 'Plot 890, F-7 Markaz',
-    city: 'Islamabad'
-  },
-  {
-    id: '#1004',
-    customer: 'Neha Gupta',
-    product: 'AirPods Pro',
-    amount: 'PKR 24,900',
-    status: 'delivered',
-    date: '2026-04-23',
-    phone: '+92 303 4567890',
-    email: 'neha@example.com',
-    address: 'House 234, Canal Road',
-    city: 'Faisalabad'
-  },
-  {
-    id: '#1005',
-    customer: 'Vikram Singh',
-    product: 'iPad Air',
-    amount: 'PKR 59,900',
-    status: 'new',
-    date: '2026-04-25',
-    phone: '+92 304 5678901',
-    email: 'vikram@example.com',
-    address: 'Shop 12, Main Bazaar',
-    city: 'Multan'
-  },
-];
+function toOrder(dto: OrderDto): Order {
+  return {
+    id: dto.id,
+    ref: `#${dto.id.slice(0, 6).toUpperCase()}`,
+    customerId: dto.customerId,
+    customer: dto.customerName ?? 'Unknown',
+    phone: dto.customerPhone ?? '',
+    product: dto.product ?? '—',
+    amount: formatProductPrice(dto.totalAmount),
+    amountValue: dto.totalAmount,
+    status: dto.status,
+    date: formatDate(dto.createdAt),
+    createdAt: dto.createdAt,
+    address: dto.deliveryAddress ?? '',
+    city: dto.city ?? '',
+    items:
+      dto.items?.map((i) => ({
+        productId: i.productId,
+        productName: i.productName,
+        qty: i.qty,
+        price: i.price,
+      })) ?? [],
+  };
+}
 
-const initialCustomers: Customer[] = [
-  { id: 1, name: 'Rahul Kumar', phone: '+92 300 1234567', email: 'rahul@example.com', city: 'Karachi', orders: 12, totalSpent: 'PKR 245,000', tag: 'VIP' },
-  { id: 2, name: 'Priya Sharma', phone: '+92 301 2345678', email: 'priya@example.com', city: 'Lahore', orders: 8, totalSpent: 'PKR 120,000', tag: 'Regular' },
-  { id: 3, name: 'Amit Patel', phone: '+92 302 3456789', email: 'amit@example.com', city: 'Islamabad', orders: 15, totalSpent: 'PKR 380,000', tag: 'VIP' },
-  { id: 4, name: 'Neha Gupta', phone: '+92 303 4567890', email: 'neha@example.com', city: 'Faisalabad', orders: 5, totalSpent: 'PKR 65,000', tag: 'Regular' },
-  { id: 5, name: 'Vikram Singh', phone: '+92 304 5678901', email: 'vikram@example.com', city: 'Multan', orders: 3, totalSpent: 'PKR 45,000', tag: 'New' },
-];
+function toCustomer(dto: CustomerDto): Customer {
+  return {
+    id: dto.id,
+    name: dto.name ?? 'Unknown',
+    phone: dto.phoneNumber,
+    email: dto.email ?? '',
+    city: dto.city ?? '',
+    orders: dto.orderCount,
+    totalSpent: formatProductPrice(dto.totalSpent),
+    totalSpentValue: dto.totalSpent,
+    tier: dto.tier,
+  };
+}
 
-const initialChats: Chat[] = [
-  { id: 1, name: 'Rahul Kumar', lastMessage: 'Do you have the product in stock?', time: '2m ago', unread: 3, status: 'active' },
-  { id: 2, name: 'Priya Sharma', lastMessage: 'When will my order be delivered?', time: '15m ago', unread: 1, status: 'active' },
-  { id: 3, name: 'Amit Patel', lastMessage: 'Thank you!', time: '1h ago', unread: 0, status: 'resolved' },
-  { id: 4, name: 'Neha Gupta', lastMessage: 'I want to place an order', time: '2h ago', unread: 2, status: 'active' },
-  { id: 5, name: 'Vikram Singh', lastMessage: 'What are the prices?', time: '3h ago', unread: 0, status: 'pending' },
-];
+function toChat(dto: ConversationDto): Chat {
+  return {
+    id: dto.id,
+    customerId: dto.customerId,
+    name: dto.customerName ?? dto.customerPhone ?? 'Unknown',
+    phone: dto.customerPhone,
+    lastMessage: dto.lastMessage ?? '',
+    time: relTime(dto.lastMessageAt ?? dto.createdAt),
+    unread: dto.unreadCount,
+    status: dto.status,
+    lastMessageAt: dto.lastMessageAt,
+  };
+}
+
+function toChatMessage(dto: MessageDto): ChatMessage {
+  return {
+    id: dto.id,
+    from: dto.senderType,
+    text: dto.content,
+    time: new Date(dto.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    createdAt: dto.createdAt,
+  };
+}
+
+function toCategory(dto: CategoryDto): Category {
+  return { id: dto.id, name: dto.name };
+}
+
+// ---------------------------------------------------------------------------
+// Context
+// ---------------------------------------------------------------------------
+
+interface DataContextType {
+  orders: Order[];
+  ordersLoading: boolean;
+  ordersError: string | null;
+  refreshOrders: () => Promise<void>;
+  addOrder: (input: CreateOrderInput) => Promise<Order>;
+  updateOrderStatus: (id: string, status: OrderStatus) => Promise<void>;
+
+  products: Product[];
+  productsLoading: boolean;
+  productsError: string | null;
+  refreshProducts: () => Promise<void>;
+  addProduct: (
+    product: Omit<Product, 'id' | 'price' | 'priceValue' | 'status' | 'orderCount' | 'unitsSold'> & {
+      priceValue: number;
+      status?: Product['status'];
+    },
+  ) => Promise<void>;
+  updateProduct: (
+    id: string,
+    updates: Partial<Omit<Product, 'id' | 'price' | 'priceValue' | 'orderCount' | 'unitsSold'>> & {
+      priceValue?: number;
+    },
+  ) => Promise<void>;
+  deleteProduct: (id: string) => Promise<void>;
+
+  categories: Category[];
+  refreshCategories: () => Promise<void>;
+  addCategory: (name: string) => Promise<Category>;
+
+  customers: Customer[];
+  customersLoading: boolean;
+  customersError: string | null;
+  refreshCustomers: () => Promise<void>;
+  addCustomer: (input: CustomerInput) => Promise<Customer>;
+  updateCustomer: (id: string, updates: Partial<CustomerInput>) => Promise<void>;
+
+  chats: Chat[];
+  chatsLoading: boolean;
+  chatsError: string | null;
+  refreshChats: () => Promise<void>;
+  fetchMessages: (conversationId: string) => Promise<ChatMessage[]>;
+  sendChatMessage: (conversationId: string, content: string) => Promise<ChatMessage>;
+  markChatRead: (conversationId: string) => Promise<void>;
+  updateChatStatus: (conversationId: string, status: Chat['status']) => Promise<void>;
+  getOrCreateChat: (customerId: string) => Promise<Chat>;
+}
+
+const DataContext = createContext<DataContextType | undefined>(undefined);
 
 export function DataProvider({
   children,
@@ -182,19 +280,30 @@ export function DataProvider({
   children: ReactNode;
   isAuthenticated: boolean;
 }) {
-  const [orders, setOrders] = useState<Order[]>(initialOrders);
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [ordersLoading, setOrdersLoading] = useState(false);
+  const [ordersError, setOrdersError] = useState<string | null>(null);
+
   const [products, setProducts] = useState<Product[]>([]);
   const [productsLoading, setProductsLoading] = useState(false);
   const [productsError, setProductsError] = useState<string | null>(null);
-  const [customers, setCustomers] = useState<Customer[]>(initialCustomers);
-  const [chats, setChats] = useState<Chat[]>(initialChats);
 
+  const [categories, setCategories] = useState<Category[]>([]);
+
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [customersLoading, setCustomersLoading] = useState(false);
+  const [customersError, setCustomersError] = useState<string | null>(null);
+
+  const [chats, setChats] = useState<Chat[]>([]);
+  const [chatsLoading, setChatsLoading] = useState(false);
+  const [chatsError, setChatsError] = useState<string | null>(null);
+
+  // ---- Products ----------------------------------------------------------
   const refreshProducts = useCallback(async () => {
     if (!isAuthenticated) {
       setProducts([]);
       return;
     }
-
     setProductsLoading(true);
     setProductsError(null);
     try {
@@ -208,97 +317,223 @@ export function DataProvider({
     }
   }, [isAuthenticated]);
 
-  useEffect(() => {
-    void refreshProducts();
-  }, [refreshProducts]);
-
-  const addOrder = (order: Omit<Order, 'id'>) => {
-    const newId = `#${1000 + orders.length + 1}`;
-    setOrders([...orders, { ...order, id: newId }]);
-  };
-
-  const updateOrderStatus = (id: string, status: Order['status']) => {
-    setOrders(orders.map(order =>
-      order.id === id ? { ...order, status } : order
-    ));
-  };
-
-  const addProduct = async (
-    product: Omit<Product, 'id' | 'price' | 'priceValue' | 'status'> & {
-      priceValue: number;
-      status?: Product['status'];
-    },
-  ) => {
+  const addProduct: DataContextType['addProduct'] = async (product) => {
     const created = await createProductApi({
       name: product.name,
       category: product.category,
       description: product.description,
       image: product.image,
+      images: product.images,
       price: product.priceValue,
       stock: product.stock,
       status: product.status,
       variants: product.variants,
     });
-    setProducts((prev) => [...prev, toProduct(created)]);
+    setProducts((prev) => [toProduct(created), ...prev]);
   };
 
-  const updateProduct = async (
-    id: string,
-    updates: Partial<Omit<Product, 'id' | 'price' | 'priceValue'>> & { priceValue?: number },
-  ) => {
+  const updateProduct: DataContextType['updateProduct'] = async (id, updates) => {
     const updated = await updateProductApi(id, {
       name: updates.name,
       category: updates.category,
       description: updates.description,
       image: updates.image,
+      images: updates.images,
       price: updates.priceValue,
       stock: updates.stock,
       status: updates.status,
       variants: updates.variants,
     });
-    setProducts((prev) => prev.map((product) => (product.id === id ? toProduct(updated) : product)));
+    setProducts((prev) => prev.map((p) => (p.id === id ? toProduct(updated) : p)));
   };
 
   const deleteProduct = async (id: string) => {
     await deleteProductApi(id);
-    setProducts((prev) => prev.filter((product) => product.id !== id));
+    setProducts((prev) => prev.filter((p) => p.id !== id));
   };
 
-  const addCustomer = (customer: Omit<Customer, 'id'>) => {
-    const newId = Math.max(...customers.map(c => c.id)) + 1;
-    setCustomers([...customers, { ...customer, id: newId }]);
+  // ---- Categories --------------------------------------------------------
+  const refreshCategories = useCallback(async () => {
+    if (!isAuthenticated) {
+      setCategories([]);
+      return;
+    }
+    try {
+      const data = await fetchCategoriesApi();
+      setCategories(data.map(toCategory));
+    } catch {
+      setCategories([]);
+    }
+  }, [isAuthenticated]);
+
+  const addCategory = async (name: string): Promise<Category> => {
+    const created = toCategory(await createCategoryApi(name));
+    setCategories((prev) => (prev.some((c) => c.id === created.id) ? prev : [...prev, created]));
+    return created;
   };
 
-  const updateCustomer = (id: number, updates: Partial<Customer>) => {
-    setCustomers(customers.map(customer =>
-      customer.id === id ? { ...customer, ...updates } : customer
-    ));
+  // ---- Customers ---------------------------------------------------------
+  const refreshCustomers = useCallback(async () => {
+    if (!isAuthenticated) {
+      setCustomers([]);
+      return;
+    }
+    setCustomersLoading(true);
+    setCustomersError(null);
+    try {
+      const data = await fetchCustomersApi();
+      setCustomers(data.map(toCustomer));
+    } catch (error) {
+      setCustomersError(error instanceof Error ? error.message : 'Failed to load customers');
+      setCustomers([]);
+    } finally {
+      setCustomersLoading(false);
+    }
+  }, [isAuthenticated]);
+
+  const addCustomer = async (input: CustomerInput): Promise<Customer> => {
+    const created = toCustomer(await createCustomerApi(input));
+    setCustomers((prev) => [...prev, created]);
+    return created;
   };
 
-  const updateChatStatus = (id: number, status: Chat['status']) => {
-    setChats(chats.map(chat =>
-      chat.id === id ? { ...chat, status } : chat
-    ));
+  const updateCustomer = async (id: string, updates: Partial<CustomerInput>) => {
+    const updated = toCustomer(await updateCustomerApi(id, updates));
+    setCustomers((prev) => prev.map((c) => (c.id === id ? updated : c)));
   };
+
+  // ---- Orders ------------------------------------------------------------
+  const refreshOrders = useCallback(async () => {
+    if (!isAuthenticated) {
+      setOrders([]);
+      return;
+    }
+    setOrdersLoading(true);
+    setOrdersError(null);
+    try {
+      const data = await fetchOrdersApi();
+      setOrders(data.map(toOrder));
+    } catch (error) {
+      setOrdersError(error instanceof Error ? error.message : 'Failed to load orders');
+      setOrders([]);
+    } finally {
+      setOrdersLoading(false);
+    }
+  }, [isAuthenticated]);
+
+  const addOrder = async (input: CreateOrderInput): Promise<Order> => {
+    const created = toOrder(await createOrderApi(input));
+    setOrders((prev) => [created, ...prev]);
+    // Order counts / totals for the customer changed.
+    void refreshCustomers();
+    return created;
+  };
+
+  const updateOrderStatus = async (id: string, status: OrderStatus) => {
+    const updated = toOrder(await updateOrderStatusApi(id, status));
+    setOrders((prev) => prev.map((o) => (o.id === id ? { ...o, status: updated.status } : o)));
+  };
+
+  // ---- Chats / conversations --------------------------------------------
+  const refreshChats = useCallback(async () => {
+    if (!isAuthenticated) {
+      setChats([]);
+      return;
+    }
+    setChatsLoading(true);
+    setChatsError(null);
+    try {
+      const data = await fetchConversationsApi();
+      setChats(data.map(toChat));
+    } catch (error) {
+      setChatsError(error instanceof Error ? error.message : 'Failed to load chats');
+      setChats([]);
+    } finally {
+      setChatsLoading(false);
+    }
+  }, [isAuthenticated]);
+
+  const fetchMessages = async (conversationId: string): Promise<ChatMessage[]> => {
+    const data = await fetchMessagesApi(conversationId);
+    return data.map(toChatMessage);
+  };
+
+  const sendChatMessage = async (conversationId: string, content: string): Promise<ChatMessage> => {
+    const msg = toChatMessage(await sendMessageApi(conversationId, content));
+    setChats((prev) =>
+      prev.map((c) =>
+        c.id === conversationId
+          ? { ...c, lastMessage: content, time: relTime(msg.createdAt), lastMessageAt: msg.createdAt }
+          : c,
+      ),
+    );
+    return msg;
+  };
+
+  const markChatRead = async (conversationId: string) => {
+    setChats((prev) => prev.map((c) => (c.id === conversationId ? { ...c, unread: 0 } : c)));
+    try {
+      await markConversationReadApi(conversationId);
+    } catch {
+      // non-fatal; the badge will re-sync on next refresh
+    }
+  };
+
+  const updateChatStatus = async (conversationId: string, status: Chat['status']) => {
+    setChats((prev) => prev.map((c) => (c.id === conversationId ? { ...c, status } : c)));
+    await updateConversationStatusApi(conversationId, status);
+  };
+
+  const getOrCreateChat = async (customerId: string): Promise<Chat> => {
+    const chat = toChat(await getOrCreateConversationApi(customerId));
+    setChats((prev) => (prev.some((c) => c.id === chat.id) ? prev : [chat, ...prev]));
+    return chat;
+  };
+
+  useEffect(() => {
+    void refreshProducts();
+    void refreshCategories();
+    void refreshCustomers();
+    void refreshOrders();
+    void refreshChats();
+  }, [refreshProducts, refreshCategories, refreshCustomers, refreshOrders, refreshChats]);
 
   return (
-    <DataContext.Provider value={{
-      orders,
-      addOrder,
-      updateOrderStatus,
-      products,
-      productsLoading,
-      productsError,
-      refreshProducts,
-      addProduct,
-      updateProduct,
-      deleteProduct,
-      customers,
-      addCustomer,
-      updateCustomer,
-      chats,
-      updateChatStatus,
-    }}>
+    <DataContext.Provider
+      value={{
+        orders,
+        ordersLoading,
+        ordersError,
+        refreshOrders,
+        addOrder,
+        updateOrderStatus,
+        products,
+        productsLoading,
+        productsError,
+        refreshProducts,
+        addProduct,
+        updateProduct,
+        deleteProduct,
+        categories,
+        refreshCategories,
+        addCategory,
+        customers,
+        customersLoading,
+        customersError,
+        refreshCustomers,
+        addCustomer,
+        updateCustomer,
+        chats,
+        chatsLoading,
+        chatsError,
+        refreshChats,
+        fetchMessages,
+        sendChatMessage,
+        markChatRead,
+        updateChatStatus,
+        getOrCreateChat,
+      }}
+    >
       {children}
     </DataContext.Provider>
   );

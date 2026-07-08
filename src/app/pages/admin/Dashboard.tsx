@@ -96,10 +96,10 @@ export function AdminDashboard() {
                 <div key={order.id} className="flex items-center justify-between p-2 md:p-3 bg-muted rounded-lg hover:shadow-md transition-shadow cursor-pointer gap-2">
                   <div className="flex items-center gap-2 md:gap-3 flex-1 min-w-0">
                     <div className="w-8 h-8 md:w-10 md:h-10 bg-primary text-primary-foreground rounded-lg flex items-center justify-center text-xs md:text-sm flex-shrink-0">
-                      {order.id.slice(-2)}
+                      {order.ref.slice(-2)}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-xs md:text-sm truncate">{order.id}</p>
+                      <p className="text-xs md:text-sm truncate">{order.ref}</p>
                       <p className="text-xs text-muted-foreground truncate">{order.product}</p>
                       <p className="text-xs text-muted-foreground mt-0.5 truncate">{order.customer}</p>
                     </div>

@@ -34,6 +34,13 @@ export default function App() {
   const [currentPath, setCurrentPath] = useState('/admin/dashboard');
   const [user, setUser] = useState<any>(null);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+  // When navigating to Chats from an order/customer, open that customer's chat.
+  const [chatCustomerTarget, setChatCustomerTarget] = useState<string | null>(null);
+
+  const navigateToChat = (customerId?: string) => {
+    setChatCustomerTarget(customerId ?? null);
+    setCurrentPath('/admin/chats');
+  };
 
   const handleLogin = async (email: string, password: string): Promise<void> => {
     const result = await loginApi(email, password);
@@ -139,13 +146,23 @@ export default function App() {
       case '/admin/dashboard':
         return <AdminDashboard />;
       case '/admin/chats':
-        return <AdminChats />;
+        return (
+          <AdminChats
+            initialCustomerId={chatCustomerTarget}
+            onConsumeInitialCustomer={() => setChatCustomerTarget(null)}
+          />
+        );
       case '/admin/orders':
-        return <AdminOrders onNavigateToChat={() => setCurrentPath('/admin/chats')} />;
+        return <AdminOrders onNavigateToChat={navigateToChat} />;
       case '/admin/products':
         return <AdminProducts />;
       case '/admin/customers':
-        return <AdminCustomers />;
+        return (
+          <AdminCustomers
+            onNavigateToChat={navigateToChat}
+            onNavigateToOrders={() => setCurrentPath('/admin/orders')}
+          />
+        );
       case '/admin/automation':
         return <AdminAutomation />;
       case '/admin/analytics':

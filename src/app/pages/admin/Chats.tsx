@@ -1,33 +1,120 @@
-import { useState } from 'react';
-import { Search, Send, Sparkles, ShoppingCart, ArrowLeft } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Search, Send, Sparkles, ShoppingCart, ArrowLeft, Loader2 } from 'lucide-react';
 import { Card } from '../../components/ui/card';
 import { Input } from '../../components/ui/input';
 import { Avatar, AvatarFallback } from '../../components/ui/avatar';
 import { Badge } from '../../components/ui/badge';
-import { useData } from '../../context/DataContext';
+import { useData, type Chat, type ChatMessage } from '../../context/DataContext';
 
-const messages = [
-  { id: 1, from: 'customer', text: 'Hi, do you have this product in stock?', time: '10:30 AM' },
-  { id: 2, from: 'ai', text: 'Yes! We have it available. Would you like to place an order? I can help you with that! 😊', time: '10:31 AM' },
-  { id: 3, from: 'customer', text: 'What is the price?', time: '10:33 AM' },
-  { id: 4, from: 'ai', text: 'I can share the latest price from our catalog. Which variant are you interested in?', time: '10:34 AM' },
-  { id: 5, from: 'customer', text: 'Yes please, I want to order', time: '10:35 AM' },
-  { id: 6, from: 'ai', text: 'Great choice! 🎉\n\nTo complete your order, I need:\n1. Your full name\n2. Delivery address\n3. Phone number', time: '10:35 AM' },
-  { id: 7, from: 'customer', text: 'Rahul Kumar\nHouse 123, Block A, Karachi\n+92 300 1234567', time: '10:36 AM' },
-  { id: 8, from: 'ai', text: '✅ Perfect! Order confirmed!\n\nYour order has been created successfully! 🎊\nOur team will contact you shortly for delivery confirmation.', time: '10:37 AM', isOrderConfirmation: true },
+type ChatFilter = 'all' | 'active' | 'pending';
+
+const FILTERS: { key: ChatFilter; label: string }[] = [
+  { key: 'all', label: 'All' },
+  { key: 'active', label: 'Active' },
+  { key: 'pending', label: 'Pending' },
 ];
 
-export function AdminChats() {
-  const { chats } = useData();
-  const [selectedChat, setSelectedChat] = useState(chats[0] ?? null);
-  const [chatMode, setChatMode] = useState<'auto' | 'manual' | 'assist'>('auto');
-  const [message, setMessage] = useState('');
+interface AdminChatsProps {
+  initialCustomerId?: string | null;
+  onConsumeInitialCustomer?: () => void;
+}
 
-  const handleSendMessage = (e: React.FormEvent) => {
+export function AdminChats({ initialCustomerId, onConsumeInitialCustomer }: AdminChatsProps) {
+  const { chats, chatsLoading, fetchMessages, sendChatMessage, markChatRead, getOrCreateChat } = useData();
+  const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
+  const [chatMode, setChatMode] = useState<'auto' | 'manual' | 'assist'>('manual');
+  const [message, setMessage] = useState('');
+  const [search, setSearch] = useState('');
+  const [filter, setFilter] = useState<ChatFilter>('all');
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messagesLoading, setMessagesLoading] = useState(false);
+  const [sending, setSending] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const filteredChats = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    return chats.filter((chat) => {
+      const matchesFilter = filter === 'all' || chat.status === filter;
+      const matchesSearch =
+        !query ||
+        chat.name.toLowerCase().includes(query) ||
+        chat.lastMessage.toLowerCase().includes(query);
+      return matchesFilter && matchesSearch;
+    });
+  }, [chats, filter, search]);
+
+  const selectedChat: Chat | null = useMemo(
+    () => chats.find((c) => c.id === selectedChatId) ?? null,
+    [chats, selectedChatId],
+  );
+
+  // If we navigated here from an order, open (or create) that customer's chat.
+  useEffect(() => {
+    if (!initialCustomerId) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const chat = await getOrCreateChat(initialCustomerId);
+        if (!cancelled) setSelectedChatId(chat.id);
+      } finally {
+        onConsumeInitialCustomer?.();
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialCustomerId]);
+
+  // Auto-select the first chat once the list loads (desktop convenience).
+  useEffect(() => {
+    if (!selectedChatId && !initialCustomerId && filteredChats.length > 0) {
+      setSelectedChatId(filteredChats[0].id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filteredChats.length]);
+
+  // Load messages + clear the unread badge whenever a chat is opened.
+  useEffect(() => {
+    if (!selectedChatId) {
+      setMessages([]);
+      return;
+    }
+    let cancelled = false;
+    setMessagesLoading(true);
+    void (async () => {
+      try {
+        const msgs = await fetchMessages(selectedChatId);
+        if (!cancelled) setMessages(msgs);
+      } finally {
+        if (!cancelled) setMessagesLoading(false);
+      }
+    })();
+    void markChatRead(selectedChatId);
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedChatId]);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!message.trim()) return;
-    console.log('Sending message:', message);
-    setMessage('');
+    if (!message.trim() || !selectedChatId || chatMode === 'auto' || sending) return;
+    const content = message.trim();
+    setSending(true);
+    try {
+      const sent = await sendChatMessage(selectedChatId, content);
+      setMessages((prev) => [...prev, sent]);
+      setMessage('');
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Failed to send message');
+    } finally {
+      setSending(false);
+    }
   };
 
   return (
@@ -36,57 +123,75 @@ export function AdminChats() {
         <div className="p-3 md:p-4 border-b flex-shrink-0">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3 h-3 md:w-4 md:h-4 text-muted-foreground" />
-            <Input placeholder="Search chats..." className="pl-8 md:pl-9 text-sm md:text-base h-9 md:h-10" />
+            <Input
+              placeholder="Search chats..."
+              className="pl-8 md:pl-9 text-sm md:text-base h-9 md:h-10"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
           </div>
 
           <div className="flex gap-1.5 md:gap-2 mt-3 md:mt-4">
-            <button className="px-2.5 md:px-3 py-1.5 bg-primary text-primary-foreground rounded-lg text-xs md:text-sm">
-              All
-            </button>
-            <button className="px-2.5 md:px-3 py-1.5 bg-secondary text-secondary-foreground rounded-lg text-xs md:text-sm hover:bg-accent">
-              Active
-            </button>
-            <button className="px-2.5 md:px-3 py-1.5 bg-secondary text-secondary-foreground rounded-lg text-xs md:text-sm hover:bg-accent">
-              Pending
-            </button>
+            {FILTERS.map((f) => (
+              <button
+                key={f.key}
+                onClick={() => setFilter(f.key)}
+                className={`px-2.5 md:px-3 py-1.5 rounded-lg text-xs md:text-sm transition-colors ${
+                  filter === f.key
+                    ? 'bg-primary text-primary-foreground'
+                    : 'bg-secondary text-secondary-foreground hover:bg-accent'
+                }`}
+              >
+                {f.label}
+              </button>
+            ))}
           </div>
         </div>
 
         <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain">
-          {chats.map((chat) => (
-            <button
-              key={chat.id}
-              onClick={() => setSelectedChat(chat)}
-              className={`w-full p-3 md:p-4 border-b hover:bg-accent transition-colors text-left ${
-                selectedChat?.id === chat.id ? 'bg-accent' : ''
-              }`}
-            >
-              <div className="flex items-start gap-2 md:gap-3">
-                <Avatar className="w-9 h-9 md:w-10 md:h-10">
-                  <AvatarFallback className="text-xs md:text-sm">
-                    {chat.name.split(' ').map(n => n[0]).join('')}
-                  </AvatarFallback>
-                </Avatar>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="truncate text-sm md:text-base">{chat.name}</p>
-                    <span className="text-xs text-muted-foreground whitespace-nowrap">{chat.time}</span>
-                  </div>
-                  <p className="text-xs md:text-sm text-muted-foreground truncate mt-0.5 md:mt-1">{chat.lastMessage}</p>
-                  <div className="flex items-center gap-1.5 md:gap-2 mt-1.5 md:mt-2">
-                    <Badge variant={chat.status === 'active' ? 'default' : 'secondary'} className="text-xs">
-                      {chat.status}
-                    </Badge>
-                    {chat.unread > 0 && (
-                      <span className="px-1.5 md:px-2 py-0.5 bg-destructive text-destructive-foreground rounded-full text-xs">
-                        {chat.unread}
-                      </span>
-                    )}
+          {chatsLoading ? (
+            <div className="flex items-center justify-center py-10 text-muted-foreground gap-2 text-sm">
+              <Loader2 className="w-4 h-4 animate-spin" />
+              Loading chats...
+            </div>
+          ) : filteredChats.length === 0 ? (
+            <div className="text-center py-10 text-muted-foreground text-sm px-4">No chats found</div>
+          ) : (
+            filteredChats.map((chat) => (
+              <button
+                key={chat.id}
+                onClick={() => setSelectedChatId(chat.id)}
+                className={`w-full p-3 md:p-4 border-b hover:bg-accent transition-colors text-left ${
+                  selectedChat?.id === chat.id ? 'bg-accent' : ''
+                }`}
+              >
+                <div className="flex items-start gap-2 md:gap-3">
+                  <Avatar className="w-9 h-9 md:w-10 md:h-10">
+                    <AvatarFallback className="text-xs md:text-sm">
+                      {chat.name.split(' ').map((n) => n[0]).join('').slice(0, 2)}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="truncate text-sm md:text-base">{chat.name}</p>
+                      <span className="text-xs text-muted-foreground whitespace-nowrap">{chat.time}</span>
+                    </div>
+                    <p className="text-xs md:text-sm text-muted-foreground truncate mt-0.5 md:mt-1">{chat.lastMessage}</p>
+                    <div className="flex items-center gap-1.5 md:gap-2 mt-1.5 md:mt-2">
+                      <Badge variant={chat.status === 'active' ? 'default' : 'secondary'} className="text-xs capitalize">
+                        {chat.status}
+                      </Badge>
+                      {chat.unread > 0 && (
+                        <span className="px-1.5 md:px-2 py-0.5 bg-destructive text-destructive-foreground rounded-full text-xs">
+                          {chat.unread}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
-              </div>
-            </button>
-          ))}
+              </button>
+            ))
+          )}
         </div>
       </Card>
 
@@ -97,19 +202,19 @@ export function AdminChats() {
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2 md:gap-3 flex-1 min-w-0">
                   <button
-                    onClick={() => setSelectedChat(null)}
+                    onClick={() => setSelectedChatId(null)}
                     className="lg:hidden p-2 hover:bg-accent rounded-lg flex-shrink-0"
                   >
                     <ArrowLeft className="w-5 h-5" />
                   </button>
                   <Avatar className="w-8 h-8 md:w-10 md:h-10 flex-shrink-0">
                     <AvatarFallback className="text-xs md:text-sm">
-                      {selectedChat.name.split(' ').map(n => n[0]).join('')}
+                      {selectedChat.name.split(' ').map((n) => n[0]).join('').slice(0, 2)}
                     </AvatarFallback>
                   </Avatar>
                   <div className="min-w-0 flex-1">
                     <p className="text-sm md:text-base truncate">{selectedChat.name}</p>
-                    <p className="text-xs md:text-sm text-muted-foreground">Online</p>
+                    <p className="text-xs md:text-sm text-muted-foreground truncate">{selectedChat.phone}</p>
                   </div>
                 </div>
 
@@ -146,45 +251,46 @@ export function AdminChats() {
             </div>
 
             <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-3 md:p-4 space-y-3 md:space-y-4">
-              {messages.map((msg) => (
-                <div
-                  key={msg.id}
-                  className={`flex ${msg.from === 'admin' ? 'justify-end' : 'justify-start'}`}
-                >
-                  <div className={`max-w-[85%] sm:max-w-[70%] ${msg.from === 'admin' ? 'order-2' : 'order-1'}`}>
-                    <div
-                      className={`rounded-lg p-2.5 md:p-3 ${
-                        msg.from === 'admin'
-                          ? 'bg-primary text-primary-foreground'
-                          : msg.from === 'ai'
-                          ? 'bg-green-50 border border-green-200'
-                          : 'bg-muted'
-                      }`}
-                    >
-                      {msg.from === 'ai' && (
-                        <div className="flex items-center gap-2 mb-2">
-                          <Sparkles className="w-3 h-3 md:w-4 md:h-4 text-green-600" />
-                          <span className="text-xs font-medium text-green-700">AI Assistant</span>
-                        </div>
-                      )}
-                      <p className={`whitespace-pre-line text-sm md:text-base ${msg.from === 'ai' ? 'text-green-900' : ''}`}>
-                        {msg.text}
-                      </p>
-                      {msg.isOrderConfirmation && (
-                        <div className="mt-2 md:mt-3 pt-2 md:pt-3 border-t border-green-300">
-                          <div className="flex items-start gap-2 text-green-700 bg-green-100 px-2 md:px-3 py-2 rounded">
-                            <ShoppingCart className="w-3 h-3 md:w-4 md:h-4 flex-shrink-0 mt-0.5" />
-                            <p className="text-xs">
-                              ✅ Order automatically created in Orders page
-                            </p>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                    <p className="text-xs text-muted-foreground mt-1 px-1">{msg.time}</p>
-                  </div>
+              {messagesLoading ? (
+                <div className="flex items-center justify-center py-10 text-muted-foreground gap-2 text-sm">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Loading messages...
                 </div>
-              ))}
+              ) : messages.length === 0 ? (
+                <div className="text-center py-10 text-muted-foreground text-sm">No messages yet. Say hello!</div>
+              ) : (
+                messages.map((msg) => {
+                  const isOutgoing = msg.from === 'agent';
+                  const isAi = msg.from === 'ai';
+                  return (
+                    <div key={msg.id} className={`flex ${isOutgoing ? 'justify-end' : 'justify-start'}`}>
+                      <div className={`max-w-[85%] sm:max-w-[70%] ${isOutgoing ? 'order-2' : 'order-1'}`}>
+                        <div
+                          className={`rounded-lg p-2.5 md:p-3 ${
+                            isOutgoing
+                              ? 'bg-primary text-primary-foreground'
+                              : isAi
+                              ? 'bg-green-50 border border-green-200'
+                              : 'bg-muted'
+                          }`}
+                        >
+                          {isAi && (
+                            <div className="flex items-center gap-2 mb-2">
+                              <Sparkles className="w-3 h-3 md:w-4 md:h-4 text-green-600" />
+                              <span className="text-xs font-medium text-green-700">AI Assistant</span>
+                            </div>
+                          )}
+                          <p className={`whitespace-pre-line text-sm md:text-base ${isAi ? 'text-green-900' : ''}`}>
+                            {msg.text}
+                          </p>
+                        </div>
+                        <p className={`text-xs text-muted-foreground mt-1 px-1 ${isOutgoing ? 'text-right' : ''}`}>{msg.time}</p>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+              <div ref={messagesEndRef} />
             </div>
 
             {chatMode === 'auto' && (
@@ -194,7 +300,7 @@ export function AdminChats() {
                   <div className="flex-1 min-w-0">
                     <p className="text-xs md:text-sm">AI is handling this conversation automatically</p>
                     <p className="text-xs text-muted-foreground mt-1">
-                      Orders are created automatically when customer confirms. Check Orders page to review.
+                      Switch to Manual to reply to this customer yourself.
                     </p>
                   </div>
                 </div>
@@ -204,28 +310,29 @@ export function AdminChats() {
             <div className="p-3 md:p-4 border-t flex-shrink-0">
               <form onSubmit={handleSendMessage} className="flex gap-2">
                 <Input
-                  placeholder={chatMode === 'auto' ? 'AI is handling this chat...' : 'Type a message...'}
+                  placeholder={chatMode === 'auto' ? 'Switch to Manual to reply...' : 'Type a message...'}
                   className="flex-1 text-sm md:text-base"
                   value={message}
                   onChange={(e) => setMessage(e.target.value)}
-                  disabled={chatMode === 'auto'}
+                  disabled={chatMode === 'auto' || sending}
                 />
                 <button
                   type="submit"
-                  disabled={chatMode === 'auto'}
+                  disabled={chatMode === 'auto' || sending || !message.trim()}
                   className={`px-3 md:px-4 py-2 rounded-lg ${
-                    chatMode === 'auto'
+                    chatMode === 'auto' || sending || !message.trim()
                       ? 'bg-secondary text-secondary-foreground opacity-50 cursor-not-allowed'
                       : 'bg-primary text-primary-foreground hover:opacity-90'
                   }`}
                 >
-                  <Send className="w-3 h-3 md:w-4 md:h-4" />
+                  {sending ? <Loader2 className="w-3 h-3 md:w-4 md:h-4 animate-spin" /> : <Send className="w-3 h-3 md:w-4 md:h-4" />}
                 </button>
               </form>
             </div>
           </>
         ) : (
-          <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm">
+          <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm gap-2">
+            <ShoppingCart className="w-4 h-4 opacity-50" />
             Select a chat to start messaging
           </div>
         )}
