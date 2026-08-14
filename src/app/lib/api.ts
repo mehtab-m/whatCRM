@@ -85,6 +85,58 @@ export async function registerApi(data: {
   });
 }
 
+export async function changePasswordApi(
+  currentPassword: string,
+  newPassword: string,
+  confirmPassword: string,
+): Promise<{ message: string }> {
+  return apiFetch<{ message: string }>('/api/auth/change-password', {
+    method: 'POST',
+    body: JSON.stringify({
+      currentPassword,
+      newPassword,
+      confirmPassword,
+    }),
+  });
+}
+
+export async function forgotPasswordApi(
+  email: string,
+): Promise<{ message: string }> {
+  return apiFetch<{ message: string }>('/api/auth/forgot-password', {
+    method: 'POST',
+    body: JSON.stringify({ email }),
+  });
+}
+
+export async function verifyResetOtpApi(
+  email: string,
+  otp: string,
+): Promise<{ resetToken: string }> {
+  return apiFetch<{ resetToken: string }>('/api/auth/verify-reset-otp', {
+    method: 'POST',
+    body: JSON.stringify({
+      email,
+      otp,
+    }),
+  });
+}
+
+export async function resetPasswordApi(
+  resetToken: string,
+  newPassword: string,
+  confirmPassword: string,
+): Promise<{ message: string }> {
+  return apiFetch<{ message: string }>('/api/auth/reset-password', {
+    method: 'POST',
+    body: JSON.stringify({
+      resetToken,
+      newPassword,
+      confirmPassword,
+    }),
+  });
+}
+
 export interface ProductDto {
   id: string;
   name: string;

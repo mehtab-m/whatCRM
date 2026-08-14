@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Bell, Search, User, Settings, LogOut, HelpCircle, Menu } from 'lucide-react';
 import { Input } from '../ui/input';
 import { Avatar, AvatarFallback } from '../ui/avatar';
+import { changePasswordApi } from '../../lib/api';
 
 interface HeaderProps {
   title: string;
@@ -13,6 +14,57 @@ interface HeaderProps {
 export function Header({ title, userType, onLogout, onMobileMenuToggle }: HeaderProps) {
   const [showNotifications, setShowNotifications] = useState(false);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
+
+  const [showChangePassword, setShowChangePassword] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+
+  const [passwordError, setPasswordError] = useState('');
+  const [passwordSuccess, setPasswordSuccess] = useState('');
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
+
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPasswordError('');
+    setPasswordSuccess('');
+
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      setPasswordError('Please fill in all fields.');
+      return;
+    }
+
+    if (newPassword.length < 8) {
+      setPasswordError('New password must be at least 8 characters.');
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      setPasswordError('New passwords do not match.');
+      return;
+    }
+
+    try {
+      setIsChangingPassword(true);
+
+      const result = await changePasswordApi(
+        currentPassword,
+        newPassword,
+        confirmPassword,
+      );
+      setPasswordSuccess(result.message);
+
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+    } catch (error) {
+      setPasswordError(
+        error instanceof Error ? error.message : 'Failed to change password.',
+      );
+    } finally {
+      setIsChangingPassword(false);
+    }
+  };
 
   const notifications = [
     { id: 1, title: 'New order received', message: 'Order #1234 from Rahul Kumar', time: '2m ago', unread: true },
@@ -125,7 +177,9 @@ export function Header({ title, userType, onLogout, onMobileMenuToggle }: Header
                 <button
                   onClick={() => {
                     setShowProfileMenu(false);
-                    alert('Account Settings - This will open account security settings, password change, etc.');
+                    setShowChangePassword(true);
+                    setPasswordError('');
+                    setPasswordSuccess('');
                   }}
                   className="w-full flex items-center gap-3 px-3 py-2 hover:bg-accent rounded-lg text-left text-sm"
                 >
@@ -156,6 +210,112 @@ export function Header({ title, userType, onLogout, onMobileMenuToggle }: Header
           )}
         </div>
       </div>
+
+      {showChangePassword && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 px-4">
+          <div className="w-full max-w-md rounded-xl bg-background p-6 shadow-xl">
+            <div className="mb-5 flex items-center justify-between">
+              <div>
+                <h2 className="text-lg font-semibold">Change Password</h2>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Update your account password.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setShowChangePassword(false);
+                  setPasswordError('');
+                  setPasswordSuccess('');
+                }}
+                className="text-xl text-muted-foreground hover:text-foreground"
+              >
+                ×
+              </button>
+            </div>
+
+            <form onSubmit={handleChangePassword} className="space-y-4">
+              <div>
+                <label className="mb-1 block text-sm font-medium">
+                  Current Password
+                </label>
+
+                <input
+                  type="password"
+                  value={currentPassword}
+                  onChange={(e) => setCurrentPassword(e.target.value)}
+                  placeholder="Enter current password"
+                  className="w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:ring-2"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-medium">
+                  New Password
+                </label>
+
+                <input
+                  type="password"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  placeholder="Enter new password"
+                  className="w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:ring-2"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-medium">
+                  Confirm New Password
+                </label>
+
+                <input
+                  type="password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  placeholder="Confirm new password"
+                  className="w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:ring-2"
+                />
+              </div>
+
+              {passwordError && (
+                <p className="text-sm text-destructive">
+                  {passwordError}
+                </p>
+              )}
+
+              {passwordSuccess && (
+                <p className="text-sm text-green-600">
+                  {passwordSuccess}
+                </p>
+              )}
+
+              <div className="flex justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowChangePassword(false);
+                    setPasswordError('');
+                    setPasswordSuccess('');
+                  }}
+                  className="rounded-lg border px-4 py-2 text-sm hover:bg-accent"
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="submit"
+                  disabled={isChangingPassword}
+                  className="rounded-lg bg-primary px-4 py-2 text-sm text-primary-foreground hover:opacity-90 disabled:opacity-50"
+                >
+                  {isChangingPassword ? 'Changing...' : 'Change Password'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
     </header>
   );
 }

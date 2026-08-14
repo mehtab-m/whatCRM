@@ -7,6 +7,9 @@ import { loginApi, registerApi, setToken, clearToken } from './lib/api';
 import { LandingPage } from './pages/landing/LandingPage';
 import { Login } from './pages/auth/Login';
 import { Signup } from './pages/auth/Signup';
+import { ForgotPassword } from './pages/auth/ForgotPassword';
+import { VerifyResetOtp } from './pages/auth/VerifyResetOtp';
+import { ResetPassword } from './pages/auth/ResetPassword';
 
 import { AdminDashboard } from './pages/admin/Dashboard';
 import { AdminChats } from './pages/admin/Chats';
@@ -27,12 +30,14 @@ import { SuperAdminSystem } from './pages/superadmin/System';
 import { SuperAdminLogs } from './pages/superadmin/Logs';
 import { SuperAdminSupport } from './pages/superadmin/Support';
 
-type AppView = 'landing' | 'login' | 'signup' | 'dashboard';
+type AppView = 'landing' | 'login' | 'signup' | 'forgot-password' | 'verify-reset-otp' | 'reset-password' | 'dashboard';
 
 export default function App() {
   const [view, setView] = useState<AppView>('landing');
   const [currentPath, setCurrentPath] = useState('/admin/dashboard');
   const [user, setUser] = useState<any>(null);
+  const [resetEmail, setResetEmail] = useState('');
+  const [resetToken, setResetToken] = useState('');
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   // When navigating to Chats from an order/customer, open that customer's chat.
   const [chatCustomerTarget, setChatCustomerTarget] = useState<string | null>(null);
@@ -101,9 +106,48 @@ export default function App() {
         onLogin={handleLogin}
         onSignup={() => setView('signup')}
         onBack={() => setView('landing')}
+        onForgotPassword={() => setView('forgot-password')}
       />
     );
   }
+if (!user && view === 'forgot-password') {
+  return (
+    <ForgotPassword
+      onBack={() => setView('login')}
+      onOtpSent={(email) => {
+        setResetEmail(email);
+        setView('verify-reset-otp');
+      }}
+    />
+  );
+}
+
+  if (!user && view === 'verify-reset-otp') {
+  return (
+    <VerifyResetOtp
+      email={resetEmail}
+      onBack={() => setView('forgot-password')}
+      onVerified={(token) => {
+        setResetToken(token);
+        setView('reset-password');
+      }}
+    />
+  );
+}
+
+  if (!user && view === 'reset-password') {
+  return (
+    <ResetPassword
+      resetToken={resetToken}
+      onBack={() => setView('verify-reset-otp')}
+      onSuccess={() => {
+        setResetEmail('');
+        setResetToken('');
+        setView('login');
+      }}
+    />
+  );
+}
 
   if (!user && view === 'signup') {
     return (
