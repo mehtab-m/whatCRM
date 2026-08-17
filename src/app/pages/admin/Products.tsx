@@ -53,7 +53,13 @@ function productToForm(product: Product): ProductFormState {
   };
 }
 
-export function AdminProducts() {
+interface AdminProductsProps {
+  // business_employee can create/edit products but not delete them
+  // (backend already 403s the DELETE call; this just hides the button).
+  canDelete?: boolean;
+}
+
+export function AdminProducts({ canDelete = true }: AdminProductsProps) {
   const {
     products,
     productsLoading,
@@ -313,13 +319,15 @@ export function AdminProducts() {
                         >
                           <Edit className="w-4 h-4" />
                         </button>
-                        <button
-                          onClick={() => handleDelete(product)}
-                          className="p-2 bg-destructive text-destructive-foreground rounded-lg hover:opacity-90"
-                          title="Delete"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        {canDelete && (
+                          <button
+                            onClick={() => handleDelete(product)}
+                            className="p-2 bg-destructive text-destructive-foreground rounded-lg hover:opacity-90"
+                            title="Delete"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>

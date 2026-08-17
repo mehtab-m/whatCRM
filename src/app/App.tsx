@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Sidebar } from './components/layout/Sidebar';
 import { Header } from './components/layout/Header';
 import { DataProvider } from './context/DataContext';
-import { loginApi, registerApi, setToken, clearToken } from './lib/api';
+import { getMeApi, getToken, loginApi, registerApi, setToken, clearToken } from './lib/api';
 
 import { LandingPage } from './pages/landing/LandingPage';
 import { Login } from './pages/auth/Login';
@@ -41,6 +41,34 @@ export default function App() {
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   // When navigating to Chats from an order/customer, open that customer's chat.
   const [chatCustomerTarget, setChatCustomerTarget] = useState<string | null>(null);
+  // Restoring a session from a stored JWT on first load (avoids flashing the
+  // landing page for an already-logged-in user on refresh).
+  const [restoringSession, setRestoringSession] = useState(true);
+
+  useEffect(() => {
+    const token = getToken();
+    if (!token) {
+      setRestoringSession(false);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const me = await getMeApi();
+        if (cancelled) return;
+        setUser({ email: me.email, name: me.fullName, role: me.role, business: me.businessName });
+        setView('dashboard');
+        setCurrentPath(me.role === 'crm_owner' ? '/superadmin/dashboard' : '/admin/dashboard');
+      } catch {
+        if (!cancelled) clearToken();
+      } finally {
+        if (!cancelled) setRestoringSession(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const navigateToChat = (customerId?: string) => {
     setChatCustomerTarget(customerId ?? null);
@@ -89,6 +117,10 @@ export default function App() {
     setUser(null);
     setView('landing');
   };
+
+  if (restoringSession) {
+    return <div className="min-h-screen bg-background" />;
+  }
 
   // If user is not logged in, show landing/auth pages
   if (!user && view === 'landing') {
@@ -199,7 +231,7 @@ if (!user && view === 'forgot-password') {
       case '/admin/orders':
         return <AdminOrders onNavigateToChat={navigateToChat} />;
       case '/admin/products':
-        return <AdminProducts />;
+        return <AdminProducts canDelete={user?.role !== 'business_employee'} />;
       case '/admin/customers':
         return (
           <AdminCustomers
@@ -208,13 +240,15 @@ if (!user && view === 'forgot-password') {
           />
         );
       case '/admin/automation':
-        return <AdminAutomation />;
+        return <AdminAutomation onNavigateToSettings={() => setCurrentPath('/admin/settings')} />;
       case '/admin/analytics':
         return <AdminAnalytics />;
       case '/admin/campaigns':
         return <AdminCampaigns />;
       case '/admin/settings':
-        return <AdminSettings />;
+        // Business settings (incl. WhatsApp credentials + team) are owner-only;
+        // the backend also 403s an employee here, this is just defense in depth.
+        return user?.role === 'business_employee' ? <AdminDashboard /> : <AdminSettings />;
       case '/superadmin/dashboard':
         return <SuperAdminDashboard />;
       case '/superadmin/businesses':
@@ -239,10 +273,11 @@ if (!user && view === 'forgot-password') {
   const isChatsPage = currentPath === '/admin/chats';
 
   return (
-    <DataProvider isAuthenticated={!!user}>
+    <DataProvider isAuthenticated={!!user} isOwnerLevel={user?.role !== 'business_employee'}>
       <div className="flex h-screen bg-background overflow-hidden">
         <Sidebar
           userType={userType}
+          role={user?.role}
           currentPath={currentPath}
           onNavigate={setCurrentPath}
           isMobileOpen={isMobileSidebarOpen}

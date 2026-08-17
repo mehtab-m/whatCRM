@@ -20,10 +20,11 @@ interface AdminChatsProps {
 }
 
 export function AdminChats({ initialCustomerId, onConsumeInitialCustomer }: AdminChatsProps) {
-  const { chats, chatsLoading, fetchMessages, sendChatMessage, markChatRead, getOrCreateChat } = useData();
+  const { chats, chatsLoading, fetchMessages, sendChatMessage, markChatRead, updateChatMode, getOrCreateChat } =
+    useData();
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
-  const [chatMode, setChatMode] = useState<'auto' | 'manual' | 'assist'>('manual');
   const [message, setMessage] = useState('');
+  const [changingMode, setChangingMode] = useState(false);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<ChatFilter>('all');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -101,6 +102,8 @@ export function AdminChats({ initialCustomerId, onConsumeInitialCustomer }: Admi
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  const chatMode = selectedChat?.mode ?? 'auto';
+
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!message.trim() || !selectedChatId || chatMode === 'auto' || sending) return;
@@ -114,6 +117,18 @@ export function AdminChats({ initialCustomerId, onConsumeInitialCustomer }: Admi
       alert(error instanceof Error ? error.message : 'Failed to send message');
     } finally {
       setSending(false);
+    }
+  };
+
+  const handleChangeMode = async (mode: 'auto' | 'manual' | 'assist') => {
+    if (!selectedChatId || mode === chatMode || changingMode) return;
+    setChangingMode(true);
+    try {
+      await updateChatMode(selectedChatId, mode);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Failed to change mode');
+    } finally {
+      setChangingMode(false);
     }
   };
 
@@ -220,8 +235,9 @@ export function AdminChats({ initialCustomerId, onConsumeInitialCustomer }: Admi
 
                 <div className="flex items-center gap-1 md:gap-2 flex-shrink-0">
                   <button
-                    onClick={() => setChatMode('auto')}
-                    className={`px-2 md:px-3 py-1.5 rounded-lg text-xs md:text-sm flex items-center gap-1 ${
+                    onClick={() => handleChangeMode('auto')}
+                    disabled={changingMode}
+                    className={`px-2 md:px-3 py-1.5 rounded-lg text-xs md:text-sm flex items-center gap-1 disabled:opacity-60 ${
                       chatMode === 'auto' ? 'bg-primary text-primary-foreground' : 'bg-secondary hover:bg-accent'
                     }`}
                   >
@@ -229,8 +245,9 @@ export function AdminChats({ initialCustomerId, onConsumeInitialCustomer }: Admi
                     <span className="hidden sm:inline">Auto</span>
                   </button>
                   <button
-                    onClick={() => setChatMode('assist')}
-                    className={`px-2 md:px-3 py-1.5 rounded-lg text-xs md:text-sm ${
+                    onClick={() => handleChangeMode('assist')}
+                    disabled={changingMode}
+                    className={`px-2 md:px-3 py-1.5 rounded-lg text-xs md:text-sm disabled:opacity-60 ${
                       chatMode === 'assist' ? 'bg-primary text-primary-foreground' : 'bg-secondary hover:bg-accent'
                     }`}
                   >
@@ -238,8 +255,9 @@ export function AdminChats({ initialCustomerId, onConsumeInitialCustomer }: Admi
                     <span className="sm:hidden">A</span>
                   </button>
                   <button
-                    onClick={() => setChatMode('manual')}
-                    className={`px-2 md:px-3 py-1.5 rounded-lg text-xs md:text-sm ${
+                    onClick={() => handleChangeMode('manual')}
+                    disabled={changingMode}
+                    className={`px-2 md:px-3 py-1.5 rounded-lg text-xs md:text-sm disabled:opacity-60 ${
                       chatMode === 'manual' ? 'bg-primary text-primary-foreground' : 'bg-secondary hover:bg-accent'
                     }`}
                   >

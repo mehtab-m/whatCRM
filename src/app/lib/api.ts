@@ -72,6 +72,11 @@ export async function loginApi(email: string, password: string): Promise<AuthRes
   });
 }
 
+export async function getMeApi(): Promise<AuthUser> {
+  const data = await apiFetch<{ user: AuthUser }>('/api/auth/me');
+  return data.user;
+}
+
 export async function registerApi(data: {
   fullName: string;
   email: string;
@@ -383,6 +388,7 @@ export interface ConversationDto {
   customerName?: string;
   customerPhone: string;
   status: ConversationStatus;
+  mode: 'auto' | 'manual' | 'assist';
   unreadCount: number;
   lastMessage?: string;
   lastMessageAt?: string;
@@ -443,4 +449,139 @@ export async function updateConversationStatusApi(
     { method: 'PATCH', body: JSON.stringify({ status }) },
   );
   return data.conversation;
+}
+
+export type ConversationMode = 'auto' | 'manual' | 'assist';
+
+export async function updateConversationModeApi(
+  conversationId: string,
+  mode: ConversationMode,
+): Promise<ConversationDto> {
+  const data = await apiFetch<{ conversation: ConversationDto }>(
+    `/api/conversations/${conversationId}/mode`,
+    { method: 'PATCH', body: JSON.stringify({ mode }) },
+  );
+  return data.conversation;
+}
+
+// ---------------------------------------------------------------------------
+// Business settings
+// ---------------------------------------------------------------------------
+
+export interface BusinessSettingsDto {
+  id: string;
+  name: string;
+  whatsappPhoneNumberId?: string;
+  whatsappAccessToken?: string;
+  whatsappBusinessAccountId?: string;
+  notifyEmail?: string;
+  aiInstructions?: string;
+  aiAutoReplyEnabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UpdateBusinessSettingsInput {
+  name?: string;
+  whatsappPhoneNumberId?: string;
+  whatsappAccessToken?: string;
+  whatsappBusinessAccountId?: string;
+  notifyEmail?: string;
+  aiInstructions?: string;
+  aiAutoReplyEnabled?: boolean;
+}
+
+export async function fetchBusinessSettingsApi(): Promise<BusinessSettingsDto> {
+  const data = await apiFetch<{ business: BusinessSettingsDto }>('/api/businesses/settings');
+  return data.business;
+}
+
+export async function updateBusinessSettingsApi(
+  input: UpdateBusinessSettingsInput,
+): Promise<BusinessSettingsDto> {
+  const data = await apiFetch<{ business: BusinessSettingsDto }>('/api/businesses/settings', {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  });
+  return data.business;
+}
+
+export interface WhatsappConnectionTestResult {
+  connected: boolean;
+  displayPhoneNumber?: string;
+  verifiedName?: string;
+  error?: string;
+}
+
+export async function testWhatsappConnectionApi(): Promise<WhatsappConnectionTestResult> {
+  return apiFetch<WhatsappConnectionTestResult>('/api/businesses/settings/test-whatsapp');
+}
+
+// ---------------------------------------------------------------------------
+// Team members
+// ---------------------------------------------------------------------------
+
+export interface TeamMemberDto {
+  id: string;
+  email: string;
+  fullName: string;
+  phone?: string;
+  role: 'business_employee';
+  isActive: boolean;
+  createdAt: string;
+}
+
+export interface CreateTeamMemberInput {
+  email: string;
+  password: string;
+  fullName: string;
+  phone?: string;
+}
+
+export async function fetchTeamMembersApi(): Promise<TeamMemberDto[]> {
+  const data = await apiFetch<{ members: TeamMemberDto[] }>('/api/team');
+  return data.members;
+}
+
+export async function createTeamMemberApi(input: CreateTeamMemberInput): Promise<TeamMemberDto> {
+  const data = await apiFetch<{ member: TeamMemberDto }>('/api/team', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+  return data.member;
+}
+
+export async function deleteTeamMemberApi(id: string): Promise<void> {
+  await apiFetch<void>(`/api/team/${id}`, { method: 'DELETE' });
+}
+
+// ---------------------------------------------------------------------------
+// CRM owner (superadmin) - platform-wide stats
+// ---------------------------------------------------------------------------
+
+export interface PlatformStatsDto {
+  totalBusinesses: number;
+  totalUsers: number;
+  totalCustomers: number;
+  totalOrders: number;
+  totalRevenue: number;
+}
+
+export interface BusinessOverviewDto {
+  id: string;
+  name: string;
+  userCount: number;
+  customerCount: number;
+  orderCount: number;
+  revenue: number;
+  createdAt: string;
+}
+
+export async function fetchPlatformStatsApi(): Promise<PlatformStatsDto> {
+  return apiFetch<PlatformStatsDto>('/api/crm-owner/stats');
+}
+
+export async function fetchBusinessOverviewsApi(): Promise<BusinessOverviewDto[]> {
+  const data = await apiFetch<{ businesses: BusinessOverviewDto[] }>('/api/crm-owner/businesses');
+  return data.businesses;
 }

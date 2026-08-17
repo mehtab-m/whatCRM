@@ -19,16 +19,19 @@ import {
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
+export type UserRole = 'crm_owner' | 'business_owner' | 'business_employee';
+
 interface SidebarProps {
   userType: 'admin' | 'superadmin';
+  role?: UserRole;
   currentPath: string;
   onNavigate: (path: string) => void;
   isMobileOpen?: boolean;
   onMobileClose?: () => void;
 }
 
-export function Sidebar({ userType, currentPath, onNavigate, isMobileOpen, onMobileClose }: SidebarProps) {
-  const adminMenuItems = [
+export function Sidebar({ userType, role, currentPath, onNavigate, isMobileOpen, onMobileClose }: SidebarProps) {
+  const allAdminMenuItems = [
     { icon: LayoutDashboard, label: 'Dashboard', path: '/admin/dashboard' },
     { icon: MessageSquare, label: 'Chats', path: '/admin/chats' },
     { icon: ShoppingCart, label: 'Orders', path: '/admin/orders' },
@@ -37,8 +40,14 @@ export function Sidebar({ userType, currentPath, onNavigate, isMobileOpen, onMob
     { icon: Zap, label: 'Automation', path: '/admin/automation' },
     { icon: BarChart3, label: 'Analytics', path: '/admin/analytics' },
     { icon: Megaphone, label: 'Campaigns', path: '/admin/campaigns' },
-    { icon: Settings, label: 'Settings', path: '/admin/settings' },
+    // Business settings (incl. WhatsApp credentials + team management) are
+    // owner/crm_owner only per the permission matrix - the backend already
+    // 403s an employee here, this just keeps the nav honest about it.
+    { icon: Settings, label: 'Settings', path: '/admin/settings', ownerOnly: true },
   ];
+
+  const adminMenuItems =
+    role === 'business_employee' ? allAdminMenuItems.filter((item) => !item.ownerOnly) : allAdminMenuItems;
 
   const superAdminMenuItems = [
     { icon: LayoutDashboard, label: 'Dashboard', path: '/superadmin/dashboard' },

@@ -5,24 +5,34 @@ import {
   createCustomerApi,
   createOrderApi,
   createProductApi,
+  createTeamMemberApi,
   deleteProductApi,
+  deleteTeamMemberApi,
+  fetchBusinessSettingsApi,
   fetchCategoriesApi,
   fetchConversationsApi,
   fetchCustomersApi,
   fetchMessagesApi,
   fetchOrdersApi,
   fetchProductsApi,
+  fetchTeamMembersApi,
   formatProductPrice,
   getOrCreateConversationApi,
   markConversationReadApi,
   sendMessageApi,
+  testWhatsappConnectionApi,
+  updateBusinessSettingsApi,
+  updateConversationModeApi,
   updateConversationStatusApi,
   updateCustomerApi,
   updateOrderStatusApi,
   updateProductApi,
+  type BusinessSettingsDto,
   type CategoryDto,
   type ConversationDto,
+  type ConversationMode,
   type CreateOrderInput,
+  type CreateTeamMemberInput,
   type CustomerDto,
   type CustomerInput,
   type CustomerTier,
@@ -30,6 +40,9 @@ import {
   type OrderDto,
   type OrderStatus,
   type ProductDto,
+  type TeamMemberDto,
+  type UpdateBusinessSettingsInput,
+  type WhatsappConnectionTestResult,
 } from '../lib/api';
 
 // ---------------------------------------------------------------------------
@@ -101,6 +114,7 @@ export interface Chat {
   time: string;
   unread: number;
   status: 'active' | 'pending' | 'resolved';
+  mode: ConversationMode;
   lastMessageAt?: string;
 }
 
@@ -201,6 +215,7 @@ function toChat(dto: ConversationDto): Chat {
     time: relTime(dto.lastMessageAt ?? dto.createdAt),
     unread: dto.unreadCount,
     status: dto.status,
+    mode: dto.mode,
     lastMessageAt: dto.lastMessageAt,
   };
 }
@@ -268,7 +283,22 @@ interface DataContextType {
   sendChatMessage: (conversationId: string, content: string) => Promise<ChatMessage>;
   markChatRead: (conversationId: string) => Promise<void>;
   updateChatStatus: (conversationId: string, status: Chat['status']) => Promise<void>;
+  updateChatMode: (conversationId: string, mode: ConversationMode) => Promise<void>;
   getOrCreateChat: (customerId: string) => Promise<Chat>;
+
+  businessSettings: BusinessSettingsDto | null;
+  businessSettingsLoading: boolean;
+  businessSettingsError: string | null;
+  refreshBusinessSettings: () => Promise<void>;
+  updateBusinessSettings: (input: UpdateBusinessSettingsInput) => Promise<void>;
+  testWhatsappConnection: () => Promise<WhatsappConnectionTestResult>;
+
+  teamMembers: TeamMemberDto[];
+  teamMembersLoading: boolean;
+  teamMembersError: string | null;
+  refreshTeamMembers: () => Promise<void>;
+  addTeamMember: (input: CreateTeamMemberInput) => Promise<void>;
+  removeTeamMember: (id: string) => Promise<void>;
 }
 
 const DataContext = createContext<DataContextType | undefined>(undefined);
@@ -276,9 +306,13 @@ const DataContext = createContext<DataContextType | undefined>(undefined);
 export function DataProvider({
   children,
   isAuthenticated,
+  isOwnerLevel = true,
 }: {
   children: ReactNode;
   isAuthenticated: boolean;
+  // business_employee accounts get a 403 from /api/team and /api/businesses/settings
+  // — skip those calls entirely for that role.
+  isOwnerLevel?: boolean;
 }) {
   const [orders, setOrders] = useState<Order[]>([]);
   const [ordersLoading, setOrdersLoading] = useState(false);
@@ -297,6 +331,14 @@ export function DataProvider({
   const [chats, setChats] = useState<Chat[]>([]);
   const [chatsLoading, setChatsLoading] = useState(false);
   const [chatsError, setChatsError] = useState<string | null>(null);
+
+  const [businessSettings, setBusinessSettings] = useState<BusinessSettingsDto | null>(null);
+  const [businessSettingsLoading, setBusinessSettingsLoading] = useState(false);
+  const [businessSettingsError, setBusinessSettingsError] = useState<string | null>(null);
+
+  const [teamMembers, setTeamMembers] = useState<TeamMemberDto[]>([]);
+  const [teamMembersLoading, setTeamMembersLoading] = useState(false);
+  const [teamMembersError, setTeamMembersError] = useState<string | null>(null);
 
   // ---- Products ----------------------------------------------------------
   const refreshProducts = useCallback(async () => {
@@ -484,10 +526,72 @@ export function DataProvider({
     await updateConversationStatusApi(conversationId, status);
   };
 
+  const updateChatMode = async (conversationId: string, mode: ConversationMode) => {
+    setChats((prev) => prev.map((c) => (c.id === conversationId ? { ...c, mode } : c)));
+    await updateConversationModeApi(conversationId, mode);
+  };
+
   const getOrCreateChat = async (customerId: string): Promise<Chat> => {
     const chat = toChat(await getOrCreateConversationApi(customerId));
     setChats((prev) => (prev.some((c) => c.id === chat.id) ? prev : [chat, ...prev]));
     return chat;
+  };
+
+  // ---- Business settings --------------------------------------------------
+  const refreshBusinessSettings = useCallback(async () => {
+    if (!isAuthenticated || !isOwnerLevel) {
+      setBusinessSettings(null);
+      return;
+    }
+    setBusinessSettingsLoading(true);
+    setBusinessSettingsError(null);
+    try {
+      const data = await fetchBusinessSettingsApi();
+      setBusinessSettings(data);
+    } catch (error) {
+      setBusinessSettingsError(error instanceof Error ? error.message : 'Failed to load settings');
+      setBusinessSettings(null);
+    } finally {
+      setBusinessSettingsLoading(false);
+    }
+  }, [isAuthenticated, isOwnerLevel]);
+
+  const updateBusinessSettings = async (input: UpdateBusinessSettingsInput) => {
+    const updated = await updateBusinessSettingsApi(input);
+    setBusinessSettings(updated);
+  };
+
+  const testWhatsappConnection = async (): Promise<WhatsappConnectionTestResult> => {
+    return testWhatsappConnectionApi();
+  };
+
+  // ---- Team members --------------------------------------------------------
+  const refreshTeamMembers = useCallback(async () => {
+    if (!isAuthenticated || !isOwnerLevel) {
+      setTeamMembers([]);
+      return;
+    }
+    setTeamMembersLoading(true);
+    setTeamMembersError(null);
+    try {
+      const data = await fetchTeamMembersApi();
+      setTeamMembers(data);
+    } catch (error) {
+      setTeamMembersError(error instanceof Error ? error.message : 'Failed to load team members');
+      setTeamMembers([]);
+    } finally {
+      setTeamMembersLoading(false);
+    }
+  }, [isAuthenticated, isOwnerLevel]);
+
+  const addTeamMember = async (input: CreateTeamMemberInput) => {
+    const created = await createTeamMemberApi(input);
+    setTeamMembers((prev) => [...prev, created]);
+  };
+
+  const removeTeamMember = async (id: string) => {
+    await deleteTeamMemberApi(id);
+    setTeamMembers((prev) => prev.filter((m) => m.id !== id));
   };
 
   useEffect(() => {
@@ -496,7 +600,17 @@ export function DataProvider({
     void refreshCustomers();
     void refreshOrders();
     void refreshChats();
-  }, [refreshProducts, refreshCategories, refreshCustomers, refreshOrders, refreshChats]);
+    void refreshBusinessSettings();
+    void refreshTeamMembers();
+  }, [
+    refreshProducts,
+    refreshCategories,
+    refreshCustomers,
+    refreshOrders,
+    refreshChats,
+    refreshBusinessSettings,
+    refreshTeamMembers,
+  ]);
 
   return (
     <DataContext.Provider
@@ -531,7 +645,20 @@ export function DataProvider({
         sendChatMessage,
         markChatRead,
         updateChatStatus,
+        updateChatMode,
         getOrCreateChat,
+        businessSettings,
+        businessSettingsLoading,
+        businessSettingsError,
+        refreshBusinessSettings,
+        updateBusinessSettings,
+        testWhatsappConnection,
+        teamMembers,
+        teamMembersLoading,
+        teamMembersError,
+        refreshTeamMembers,
+        addTeamMember,
+        removeTeamMember,
       }}
     >
       {children}
